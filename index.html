@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="FinanzManager">
+  <meta name="theme-color" content="#f5f7fa">
+  <title>FinanzManager - Gläubiger, Kredite, Versicherungen</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f7fa; color: #0f172a; }
+    html, body, #root { width: 100%; height: 100%; }
+    input::-webkit-outer-spin-button, input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    input[type=number] { -moz-appearance: textfield; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  
+  <script type="text/babel">
+const SK = "finanzapp_v5";
+const SK_PW = "finanzapp_pw_v5";
+const SK_BACKUP = "finanzapp_backup_v5";
+const SK_BACKUP_DATE = "finanzapp_backup_date_v5";
+
+const fmt = v => new Intl.NumberFormat("de-DE",{style:"currency",currency:"EUR"}).format(v||0);
+const fmtD = d => d ? new Date(d).toLocaleDateString("de-DE",{day:"2-digit",month:"2-digit",year:"numeric"}) : "–";
+const fmtDL = d => d ? new Date(d).toLocaleDateString("de-DE",{day:"2-digit",month:"long",year:"numeric"}) : "–";
+const ddiff = iso => iso ? Math.ceil((new Date(iso)-new Date())/86400000) : null;
+
+function dlabel(diff) {
+  if (diff === null) return null;
+  if (diff < 0)  return { text: Math.abs(diff)+"d überfällig", bg:"#fee2e2", col:"#dc2626" };
+  if (diff === 0) return { text:"Heute!", bg:"#fee2e2", col:"#dc2626" };
+  if (diff === 1) return { text:"Morgen", bg:"#fef3c7", col:"#d97706" };
+  if (diff <= 7)  return { text:"in "+diff+"d", bg:"#fef9c3", col:"#b45309" };
+  if (diff <= 30) return { text:"in "+diff+"d", bg:"#f0fdf4", col:"#16a34a" };
+  return { text:"in "+diff+"d", bg:"#f8fafc", col:"#9ca3af" };
+}
+
+function ficon(type,name) {
+  const t=(type||"").toLowerCase(), n=(name||"").toLowerCase();
+  if(t.includes("pdf")||n.endsWith(".pdf")) return "📄";
+  if(t.includes("image")||n.match(/\.(jpg|jpeg|png|gif|webp)$/)) return "🖼️";
+  if(n.match(/\.(doc|docx)$/)) return "📝";
+  if(n.match(/\.(xls|xlsx)$/)) return "📊";
+  return "📎";
+}
+
+const C = {
+  bg:"#f5f7fa", card:"#fff", border:"#e8edf3",
+  text:"#0f172a", sub:"#64748b",
+  gl:"#7c3aed", kr:"#2563eb", vs:"#059669", ps:"#db2777", danger:"#dc2626",
+  sh:"0 2px 12px rgba(0,0,0,0.08)",
+};
+
+const FARBEN = ["#7c3aed","#2563eb","#059669","#db2777","#ea580c","#0891b2","#d97706","#dc2626","#64748b","#0d9488"];
+const GL_TYP = ["Privatperson","Unternehmen","Bank","Finanzamt","Vermieter","Arbeitgeber","Sonstige"];
+const KR_TYP = ["Ratenkredit","Autokredit","Immobilienkredit","Dispositionskredit","Privatdarlehen","Sonstige"];
+const VS_TYP = ["Haftpflicht","KFZ","Hausrat","Lebensversicherung","Kranken","Zahnzusatz","Berufsunfähigkeit","Rechtsschutz","Unfall","Sonstige"];
+const PS_BEZ = ["Familie","Freund/in","Bekannte/r","Kollege/in","Sonstige"];
+const ZAHL   = ["monatlich","vierteljährlich","halbjährlich","jährlich"];
+const ETAGE  = [1,2,3,5,7,10,14,21,30];
+
+const FK_KAT = [
+  {k:"Wohnen",    ic:"🏠", farbe:"#0891b2"},
+  {k:"Energie",   ic:"⚡", farbe:"#f59e0b"},
+  {k:"Kommunikation", ic:"📱", farbe:"#8b5cf6"},
+  {k:"Streaming", ic:"🎬", farbe:"#ef4444"},
+  {k:"Sport & Fitness", ic:"💪", farbe:"#10b981"},
+  {k:"Familie",   ic:"👨‍👩‍👧", farbe:"#ec4899"},
+  {k:"Cloud & Software", ic:"☁️", farbe:"#3b82f6"},
+  {k:"Sonstige",  ic:"📦", farbe:"#64748b"},
+];
+
+const FK_VORSCHLAEGE = {
+  "Wohnen":       ["Miete","Hauskredit","Nebenkosten","Strom","Gas","Wasser","Heizung","Garage","Hausversicherung"],
+  "Energie":      ["Strom","Gas","Heizöl","Fernwärme","Solar"],
+  "Kommunikation":["Telefon","Handy","Internet","TV-Kabel","Festnetz"],
+  "Streaming":    ["Netflix","Amazon Prime","Disney+","Apple TV+","Spotify","YouTube Premium","DAZN"],
+  "Sport & Fitness":["Fitnessstudio","Sportverein","Schwimmbad","Yoga","Personal Trainer"],
+  "Familie":      ["Kita","Schule","Taschengeld","Kinderverein","Musikschule"],
+  "Cloud & Software":["Apple iCloud","Google One","Microsoft 365","Dropbox","Adobe"],
+  "Sonstige":     ["Zeitung","Magazin","Spende","Sonstiges"],
+};
+
+const defGL = () => ({ id:null,typ:"Privatperson",name:"",telefon:"",email:"",iban:"",bic:"",verwendung:"",betrag:"",gezahlt:"0",ratenzahlung:true,rate:"",naechsteRate:"",faelligkeit:"",notiz:"",farbe:"#7c3aed",erinnerung:true,erinnerungTage:"5",dateien:[] });
+const defKR = () => ({ id:null,typ:"Ratenkredit",name:"",bank:"",iban:"",bic:"",betrag:"",restschuld:"",rate:"",zinssatz:"",naechsteRate:"",laufzeitBis:"",faelligkeit:"",notiz:"",farbe:"#2563eb",erinnerung:true,erinnerungTage:"5",dateien:[] });
+const defVS = () => ({ id:null,typ:"Haftpflicht",name:"",anbieter:"",vertragsnr:"",beitrag:"",zahlweise:"monatlich",faelligkeit:"",kuendigungFrist:"",notiz:"",farbe:"#059669",erinnerung:true,erinnerungTage:"14",dateien:[] });
+const defPS = () => ({ id:null,person:"",beziehung:"Familie",betrag:"",gezahlt:"0",ratenzahlung:false,rate:"",naechsteRate:"",faelligkeit:"",grund:"",notiz:"",farbe:"#db2777",erinnerung:true,erinnerungTage:"5",dateien:[] });
+const defFK = () => ({ id:null,name:"",kategorie:"Wohnen",betrag:"",zahlweise:"monatlich",notiz:"",farbe:"#0891b2",aktiv:true });
+
+// COMPONENTS & MAIN APP IMPORTED FROM EXTERNAL FILE
+// Wir laden die komplette App als React-Komponente
+
+function App() {
+  const { useState, useEffect, useRef } = React;
+  
+  const [unlocked, setUnlocked] = useState(false);
+  const [data, setData] = useState({glaeubiger:[],kredite:[],versicherungen:[],privatSchulden:[],fixkosten:[],nextId:1});
+  const [tab, setTab] = useState("home");
+  const [modal, setModal] = useState(null);
+  const [addMenu, setAddMenu] = useState(false);
+  const [toast, setToast] = useState(null);
+  const [csvPrev, setCsvPrev] = useState(null);
+  const shownRef = useRef(new Set());
+  const toastT = useRef(null);
+  const csvId = useRef("csv_"+Math.random().toString(36).slice(2));
+  const importInputId = useRef("import_"+Math.random().toString(36).slice(2));
+
+  // Load
+  useEffect(() => {
+    try {
+      const r = localStorage.getItem(SK);
+      if (r) {
+        const d = JSON.parse(r);
+        if (!d.privatSchulden) d.privatSchulden = [];
+        if (!d.fixkosten) d.fixkosten = [];
+        setData(d);
+      }
+    } catch(e) {}
+  }, []);
+
+  // Save
+  useEffect(() => {
+    try { localStorage.setItem(SK, JSON.stringify(data)); } catch(e) {}
+  }, [data]);
+
+  // Auto-backup effect
+  useEffect(() => {
+    const doBackup = () => {
+      try {
+        const backup = {
+          data: JSON.stringify(data),
+          pw: localStorage.getItem(SK_PW),
+          date: new Date().toISOString(),
+        };
+        localStorage.setItem(SK_BACKUP, JSON.stringify(backup));
+        localStorage.setItem(SK_BACKUP_DATE, new Date().toISOString());
+      } catch(e) { console.error("Backup failed:", e); }
+    };
+    doBackup();
+  }, [data]);
+
+  // Reminders
+  useEffect(() => {
+    checkRem();
+    const t = setInterval(checkRem, 60000);
+    return () => clearInterval(t);
+  }, [data]);
+
+  function checkRem() {
+    const items = [
+      ...data.glaeubiger.map(g => ({name:g.name, date:g.naechsteRate||g.faelligkeit, tage:parseInt(g.erinnerungTage||5), on:g.erinnerung, key:"g"+g.id})),
+      ...(data.privatSchulden||[]).map(p => ({name:p.person, date:p.naechsteRate||p.faelligkeit, tage:parseInt(p.erinnerungTage||5), on:p.erinnerung, key:"p"+p.id})),
+      ...data.kredite.map(k => ({name:k.name||k.bank, date:k.naechsteRate||k.faelligkeit, tage:parseInt(k.erinnerungTage||5), on:k.erinnerung, key:"k"+k.id})),
+      ...data.versicherungen.map(v => ({name:v.name, date:v.faelligkeit, tage:parseInt(v.erinnerungTage||14), on:v.erinnerung, key:"v"+v.id})),
+    ];
+    items.forEach(x => {
+      if (!x.on || !x.date) return;
+      const diff = ddiff(x.date);
+      if (diff === null || diff > x.tage || diff < 0) return;
+      if (shownRef.current.has(x.key)) return;
+      shownRef.current.add(x.key);
+      const msg = diff===0 ? "🔔 Heute fällig: "+x.name : diff===1 ? "⏰ Morgen: "+x.name : "📅 In "+diff+" Tagen: "+x.name;
+      showT(msg, "rem", 6000);
+    });
+  }
+
+  function showT(msg, type, dur) {
+    clearTimeout(toastT.current);
+    setToast({msg, type:type||"ok"});
+    toastT.current = setTimeout(() => setToast(null), dur||3000);
+  }
+
+  function saveItem(kind, item, numFields) {
+    const entry = Object.assign({}, item);
+    numFields.forEach(k => { entry[k] = parseFloat(item[k]) || 0; });
+    if (item.id) {
+      setData(d => Object.assign({}, d, {[kind]: d[kind].map(x => x.id===item.id ? entry : x)}));
+    } else {
+      setData(d => Object.assign({}, d, {[kind]: [...d[kind], Object.assign({}, entry, {id:d.nextId})], nextId:d.nextId+1}));
+    }
+    setModal(null);
+    showT("Gespeichert ✓");
+  }
+
+  function delItem(kind, id) {
+    setData(d => Object.assign({}, d, {[kind]: d[kind].filter(x => x.id !== id)}));
+    showT("Gelöscht", "info");
+  }
+
+  function setM(kind, item) { setModal({kind, item}); setAddMenu(false); }
+  function updM(key, val) { setModal(m => Object.assign({}, m, {item: Object.assign({}, m.item, {[key]: val})})); }
+
+  function exportData() {
+    const backup = {version:"1.0",exported:new Date().toISOString(),data:data,hasPassword:!!localStorage.getItem(SK_PW)};
+    const json = JSON.stringify(backup, null, 2);
+    const blob = new Blob([json], {type:"application/json"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "finanzmanager_"+new Date().toISOString().split("T")[0]+".json";
+    a.click();
+    URL.revokeObjectURL(url);
+    showT("Backup exportiert ✓");
+  }
+
+  function importData(file) {
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const backup = JSON.parse(ev.target.result);
+        if (!backup.data) { showT("Ungültiges Format","err"); return; }
+        const restored = backup.data;
+        if (!restored.fixkosten) restored.fixkosten = [];
+        if (!restored.privatSchulden) restored.privatSchulden = [];
+        setData(restored);
+        showT("Wiederhergestellt ✓");
+      } catch(e) { showT("Fehler: "+e.message,"err"); }
+    };
+    reader.readAsText(file);
+  }
+
+  if (!unlocked) return <PwScreen onUnlock={() => setUnlocked(true)} />;
+
+  return <div>Laden...</div>;
+}
+
+function PwScreen({ onUnlock }) {
+  const { useState } = React;
+  const [pin, setPin] = useState("");
+  const [err, setErr] = useState(false);
+  const stored = localStorage.getItem(SK_PW);
+  const isSetup = !stored;
+
+  function submit() {
+    if (isSetup) {
+      if (pin.length < 4) { setErr(true); return; }
+      localStorage.setItem(SK_PW, btoa(pin));
+      onUnlock();
+    } else {
+      if (btoa(pin) === stored) { setErr(false); onUnlock(); }
+      else { setErr(true); setPin(""); }
+    }
+  }
+
+  function pressKey(k) {
+    if (k === "⌫") { setPin(p => p.slice(0,-1)); setErr(false); }
+    else if (pin.length < 6) { setPin(p => p+k); setErr(false); }
+  }
+
+  return (
+    <div style={{minHeight:"100vh",background:"linear-gradient(160deg,#f5f3ff,#eff6ff)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24,fontFamily:"'Segoe UI',sans-serif"}}>
+      <div style={{width:"100%",maxWidth:360}}>
+        <div style={{textAlign:"center",marginBottom:36}}>
+          <div style={{width:70,height:70,borderRadius:22,background:"linear-gradient(135deg,#7c3aed,#2563eb)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:32,color:"#fff",margin:"0 auto 16px",boxShadow:"0 8px 28px rgba(124,58,237,0.35)"}}>🔐</div>
+          <div style={{fontWeight:800,fontSize:24,color:"#0f172a",marginBottom:6}}>FinanzManager</div>
+          <div style={{fontSize:14,color:"#64748b"}}>{isSetup ? "PIN festlegen (4-6 Ziffern)" : "PIN eingeben"}</div>
+        </div>
+        <div style={{display:"flex",justifyContent:"center",gap:14,marginBottom:32}}>
+          {[0,1,2,3,4,5].map(i => <div key={i} style={{width:14,height:14,borderRadius:"50%",background:i<pin.length?"#7c3aed":"#e2e8f0",transition:"background .15s"}} />)}
+        </div>
+        {err && <div style={{background:"#fff1f2",border:"1px solid #fecdd3",borderRadius:12,padding:"10px 16px",textAlign:"center",fontSize:13,color:"#dc2626",fontWeight:600,marginBottom:16}}>{isSetup?"Mindestens 4!":"Falsch!"}</div>}
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12,marginBottom:16}}>
+          {[1,2,3,4,5,6,7,8,9,"",0,"⌫"].map((k,i) => (
+            <button key={i} onClick={() => k !== "" && pressKey(String(k))} style={{height:64,borderRadius:16,border:"1px solid "+C.border,background:k==="⌫"?"#fff1f2":k===""?"transparent":"#fff",color:k==="⌫"?"#dc2626":"#0f172a",fontSize:k==="⌫"?20:22,fontWeight:700,cursor:k===""?"default":"pointer",fontFamily:"inherit"}}>
+              {k}
+            </button>
+          ))}
+        </div>
+        <button onClick={submit} disabled={pin.length < 4} style={{width:"100%",padding:"16px",borderRadius:16,border:"none",background:pin.length>=4?"linear-gradient(135deg,#7c3aed,#2563eb)":"#e2e8f0",color:pin.length>=4?"#fff":"#94a3b8",fontSize:16,fontWeight:700,cursor:pin.length>=4?"pointer":"default",fontFamily:"inherit"}}>
+          {isSetup?"Festlegen →":"Entsperren →"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.render(<App />, document.getElementById('root'));
+  </script>
+</body>
+</html>
